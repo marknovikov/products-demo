@@ -1,0 +1,5 @@
+grpcurl -plaintext -protoset products.protoset -d '{"url":"http://localhost:3000/api/products/some.csv"}' localhost:9000 products.Products/Fetch
+
+grpcurl -plaintext -protoset products.protoset localhost:9000 products.Products/List
+
+grpcurl -plaintext -protoset products.protoset -d '{"paging":{"offset":10, "limit":10}, "sorting":{"ascending":false, "sortBy": "lastModified"}}' localhost:9000 products.Products/List

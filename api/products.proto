@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package products;
+
+option go_package = "productspb;productspb";
+
+import "google/protobuf/timestamp.proto";
+
+// 2+ instances behind load balancer
+service Products {
+    rpc Fetch(FetchRequest) returns (FetchResponse) {}
+    rpc List(ListRequest) returns (ListResponse) {}
+}
+
+// downloads csv of form product_name;price by given url
+// writes downloaded products to mongo updating price as necessary with update count and time
+message FetchRequest {
+    string url = 1;
+}
+
+// empty
+message FetchResponse {
+}
+
+// returns a requested page of products
+// able to sort by any product's field
+// what if I change sorting method for arbitrary page?
+message ListRequest {
+    message Paging {
+        uint32 offset = 1;
+        uint32 limit = 2;
+    }
+    Paging paging = 1;
+
+    message Sorting {
+        bool ascending = 1;
+        string sortBy = 2;
+    }
+    Sorting sorting = 2;
+}
+
+message ListResponse {
+    message Product {
+        string id = 1;
+        string name = 2;
+        string price = 3;
+        uint32 priceUpdateCount = 4;
+        google.protobuf.Timestamp lastModified = 5;
+    }
+    repeated Product products = 1;
+}

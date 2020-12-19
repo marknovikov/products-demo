@@ -1,0 +1,64 @@
+version: "3.9"
+services:
+  mongo:
+    image: mongo:4.4
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=root
+      - MONGO_INITDB_ROOT_PASSWORD=root
+    volumes:
+      - mongodata:/data/db
+  mock:
+    build: mocks/products
+  nginx:
+    image: nginx:1.13
+    ports:
+      - "9000:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+    links:
+      - products1
+      - products2
+  products1:
+    build: .
+    ports:
+      - "8080:8080"
+    links:
+      - mongo
+      - mock
+    depends_on:
+      - mongo
+      - mock
+    environment:
+      - APP_NAME=products-demo
+      - APP_PORT=8080
+      - HTTP_TIMEOUT=2s
+      - MONGO_HOST=mongo
+      - MONGO_PORT=27017
+      - MONGO_USER=root
+      - MONGO_PASSWORD=root
+      - MONGO_DATABASE=products
+      - MONGO_CONN_TIMEOUT=2s
+      - MONGO_QUERY_TIMEOUT=5s
+  products2:
+    build: .
+    ports:
+      - 127.0.0.1:8081:8080
+    links:
+      - mongo
+      - mock
+    depends_on:
+      - mongo
+      - mock
+    environment:
+      - APP_NAME=products-demo
+      - APP_PORT=8080
+      - HTTP_TIMEOUT=2s
+      - MONGO_HOST=mongo
+      - MONGO_PORT=27017
+      - MONGO_USER=root
+      - MONGO_PASSWORD=root
+      - MONGO_DATABASE=products
+      - MONGO_CONN_TIMEOUT=2s
+      - MONGO_QUERY_TIMEOUT=5s
+volumes:
+  mongodata: {}
