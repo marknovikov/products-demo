@@ -1,5 +1,14 @@
+# Update products db
 grpcurl -plaintext -protoset products.protoset -d '{"url":"http://localhost:3000/api/products/some.csv"}' localhost:9000 products.Products/Fetch
 
+# List all products in db
 grpcurl -plaintext -protoset products.protoset localhost:9000 products.Products/List
 
-grpcurl -plaintext -protoset products.protoset -d '{"paging":{"offset":10, "limit":10}, "sorting":{"ascending":false, "sortBy": "lastModified"}}' localhost:9000 products.Products/List
+# List first 10 products
+grpcurl -plaintext -protoset products.protoset -d '{"paging":{"limit":10}}' localhost:9000 products.Products/List
+
+# List next 10 products after product with id 5fdf2712135a4a87c3ed3bd6
+grpcurl -plaintext -protoset products.protoset -d '{"paging":{"limit":10, "last": {"id": "5fdf2712135a4a87c3ed3bd6"}}}' localhost:9000 products.Products/List
+
+# List next products after product with id 5fdf2712135a4a87c3ed3bce and lastModified 2020-12-20T10:27:41.786Z sorted by lastModified in reversed order
+grpcurl -plaintext -protoset products.protoset -d '{"paging":{"limit":10, "last": {"id": "5fdf2712135a4a87c3ed3bce", "lastModified": "2020-12-20T10:27:41.786Z"}}, "sorting":{"ascending":false, "sortBy": "lastModified"}}' localhost:9000 products.Products/List
