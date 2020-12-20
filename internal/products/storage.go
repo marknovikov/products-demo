@@ -148,19 +148,47 @@ func NewMongoConn(cfg StorageConfig) (cli *mongo.Client, close func() error, err
 	ctx, cancel = context.WithTimeout(context.Background(), cfg.ConnTimeout)
 	defer cancel()
 
-	coll := cli.Database("products").Collection("products")
-	nameUniqueIdx := mongo.IndexModel{
-		Keys:    bson.D{{"name", 1}},
-		Options: options.Index().SetUnique(true),
-	}
-
-	if _, err := coll.Indexes().CreateOne(ctx, nameUniqueIdx); err != nil {
+	if err := initIndexes(cli, cfg); err != nil {
 		_ = closeMongoCli(cli, cfg.ConnTimeout)
 
-		return nil, nil, fmt.Errorf("NewMongoConn: Index: %w", err)
+		return nil, nil, fmt.Errorf("NewMongoConn: %w", err)
 	}
 
 	return cli, closer, nil
+}
+
+func initIndexes(cli *mongo.Client, cfg StorageConfig) error {
+	coll := cli.Database(cfg.Database).Collection("products")
+
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.ConnTimeout)
+	defer cancel()
+
+	ii := []mongo.IndexModel{
+		{
+			Keys:    bson.D{{"name", 1}},
+			Options: options.Index().SetUnique(true).SetName("productsNameUniqueIdx"),
+		},
+		{
+			Keys:    bson.D{{"price", 1}},
+			Options: options.Index().SetName("productsPriceIdx"),
+		},
+		{
+			Keys:    bson.D{{"priceUpdateCount", 1}},
+			Options: options.Index().SetName("productsPriceUpdateCountIdx"),
+		},
+		{
+			Keys:    bson.D{{"lastModified", 1}},
+			Options: options.Index().SetName("productsLastModifiedIdx"),
+		},
+	}
+
+	for _, idx := range ii {
+		if _, err := coll.Indexes().CreateOne(ctx, idx); err != nil {
+			return fmt.Errorf("initIndexes: create %s: %w", *idx.Options.Name, err)
+		}
+	}
+
+	return nil
 }
 
 func NewMongoStorage(cli *mongo.Client, cfg StorageConfig) (Storage, error) {
