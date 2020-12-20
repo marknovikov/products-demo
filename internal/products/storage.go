@@ -2,6 +2,7 @@ package products
 
 import (
 	"context"
+	goErrors "errors"
 	"fmt"
 	"time"
 
@@ -80,9 +81,7 @@ func (p mongoProduct) updateQuery() bson.D {
 		{"$setOnInsert", bson.D{{"name", p.Name}}},
 		{"$set", bson.D{{"price", p.Price}}},
 		{"$inc", bson.D{{"priceUpdateCount", 1}}},
-		{"$currentDate", bson.D{
-			{"lastModified", bson.D{{"$type", "timestamp"}}},
-		}},
+		{"$set", bson.D{{"lastModified", primitive.NewDateTimeFromTime(time.Now().UTC())}}},
 	}
 }
 
@@ -132,6 +131,21 @@ func NewMongoConn(cfg StorageConfig) (cli *mongo.Client, close func() error, err
 		return closeMongoCli(cli, cfg.ConnTimeout)
 	}
 
+	ctx, cancel = context.WithTimeout(context.Background(), cfg.ConnTimeout)
+	defer cancel()
+
+	coll := cli.Database("products").Collection("products")
+	nameUniqueIdx := mongo.IndexModel{
+		Keys:    bson.D{{"name", 1}},
+		Options: options.Index().SetUnique(true),
+	}
+
+	if _, err := coll.Indexes().CreateOne(ctx, nameUniqueIdx); err != nil {
+		_ = closeMongoCli(cli, cfg.ConnTimeout)
+
+		return nil, nil, fmt.Errorf("NewMongoConn: Index: %w", err)
+	}
+
 	return cli, closer, nil
 }
 
@@ -153,17 +167,35 @@ func (s *mongodb) UpdateProducts(ctx context.Context, pp []Product) error {
 		}
 
 		writeModel[i] = mongo.NewUpdateOneModel().
-			SetUpsert(true).
 			SetFilter(p.updateFilter()).
-			SetUpdate(p.updateQuery())
+			SetUpdate(p.updateQuery()).
+			SetUpsert(true)
 	}
 
-	_, err := coll.BulkWrite(ctx, writeModel)
-	if err != nil {
+	opts := options.BulkWrite().
+		SetOrdered(false)
+
+	_, err := coll.BulkWrite(ctx, writeModel, opts)
+	if err != nil && !isErrDuplicateKey(err) {
 		return fmt.Errorf("UpdateProducts: %w", err)
 	}
 
 	return nil
+}
+
+func isErrDuplicateKey(err error) bool {
+	var e mongo.BulkWriteException
+
+	if !goErrors.As(err, &e) {
+		return false
+	}
+
+	for _, we := range e.WriteErrors {
+		if we.Code == 11000 {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *mongodb) FindProducts(ctx context.Context, opts ...option) ([]Product, error) {
