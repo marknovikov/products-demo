@@ -17,8 +17,8 @@ type Product struct {
 }
 
 type Paging struct {
-	Offset uint32
-	Limit  uint32
+	Limit uint32
+	Last  *Product
 }
 
 type Sorting struct {

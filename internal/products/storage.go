@@ -4,6 +4,8 @@ import (
 	"context"
 	goErrors "errors"
 	"fmt"
+	"reflect"
+	"strings"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -70,6 +72,18 @@ func newMongoProduct(p Product) (mongoProduct, error) {
 	}, nil
 }
 
+func (p mongoProduct) get(field string) (v interface{}, err error) {
+	field = strings.Title(field)
+
+	val := reflect.ValueOf(&p).Elem()
+	fieldVal := val.FieldByName(field)
+	if !fieldVal.IsValid() {
+		return nil, fmt.Errorf("get: product has no field: %s", field)
+	}
+
+	return fieldVal.Interface(), nil
+}
+
 func (p mongoProduct) updateFilter() bson.D {
 	return bson.D{{"$and", bson.A{
 		bson.D{{"name", p.Name}},
@@ -100,13 +114,13 @@ func (p mongoProduct) toProduct() (Product, error) {
 	}, nil
 }
 
-func mongoSorting(sorting Sorting) (bson.D, error) {
+func mongoSorting(sorting Sorting) bson.D {
 	sortOrder := 1
 	if !sorting.Ascending {
 		sortOrder = -1
 	}
 
-	return bson.D{{sorting.SortBy, sortOrder}}, nil
+	return bson.D{{sorting.SortBy, sortOrder}, {"_id", sortOrder}}
 }
 
 func NewMongoConn(cfg StorageConfig) (cli *mongo.Client, close func() error, err error) {
@@ -198,25 +212,115 @@ func isErrDuplicateKey(err error) bool {
 	return false
 }
 
-func (s *mongodb) FindProducts(ctx context.Context, opts ...option) ([]Product, error) {
-	coll := s.cli.Database(s.cfg.Database).Collection("products")
+func mongoFindFilterOpts(opts ...option) (filter bson.D, mongoOpts *options.FindOptions, err error) {
+	filter = bson.D{}
+	mongoOpts = options.Find()
 
-	mongoOpts := options.Find()
 	optsHolder := applyOptions(opts)
 	if optsHolder.sorting != nil {
-		mSorting, err := mongoSorting(*optsHolder.sorting)
-		if err != nil {
-			return nil, fmt.Errorf("FindProducts: %w", err)
-		}
-		mongoOpts.SetSort(mSorting)
+		mongoOpts.SetSort(mongoSorting(*optsHolder.sorting))
 	}
 
 	if optsHolder.paging != nil {
-		mongoOpts.SetSkip(int64(optsHolder.paging.Offset))
 		mongoOpts.SetLimit(int64(optsHolder.paging.Limit))
 	}
 
-	curs, err := coll.Find(ctx, bson.M{}, mongoOpts)
+	seekPageFilter, err := resolveSeekPageFilter(optsHolder)
+	if err != nil {
+		return nil, nil, fmt.Errorf("mongoFindFilterOpts: %w", err)
+	}
+	if seekPageFilter != nil {
+		filter = append(filter, *seekPageFilter)
+	}
+
+	return filter, mongoOpts, nil
+}
+
+func resolveSeekPageFilter(opts *optsHolder) (*bson.E, error) {
+	if opts.paging == nil || opts.paging.Last == nil {
+		return nil, nil
+	}
+
+	if opts.paging.Last != nil && opts.sorting != nil {
+		return optsToSeekPageFilterStrategy[seekPageFilterStrategyWithSorting](opts)
+	}
+
+	if opts.paging.Last != nil {
+		return optsToSeekPageFilterStrategy[seekPageFilterStrategyNextPage](opts)
+	}
+
+	return nil, fmt.Errorf("seekPageFilter: no possible paging strategy for provided paging and sorting params")
+}
+
+type seekPageFilterStrategy func(opts *optsHolder) (*bson.E, error)
+
+const (
+	seekPageFilterStrategyNextPage    = "nextPage"
+	seekPageFilterStrategyWithSorting = "withSorting"
+)
+
+var optsToSeekPageFilterStrategy = map[string]seekPageFilterStrategy{
+	seekPageFilterStrategyNextPage: func(opts *optsHolder) (*bson.E, error) {
+		id, err := primitive.ObjectIDFromHex(opts.paging.Last.ID)
+		if err != nil && err != primitive.ErrInvalidHex {
+			return nil, fmt.Errorf("seekPageFilterStrategyNextPage: %w", err)
+		}
+
+		return &bson.E{"_id", bson.D{{"$gt", id}}}, nil
+	},
+	seekPageFilterStrategyWithSorting: func(opts *optsHolder) (*bson.E, error) {
+		sortByCond := "$gte"
+		idCond := "$gt"
+
+		if !opts.sorting.Ascending {
+			sortByCond = "$lte"
+			idCond = "$lt"
+		}
+
+		last, err := newMongoProduct(*opts.paging.Last)
+		if err != nil {
+			return nil, fmt.Errorf("seekPageFilterStrategyWithSorting: %w", err)
+		}
+
+		lastSortBy, err := last.get(opts.sorting.SortBy)
+		if err != nil {
+			return nil, fmt.Errorf("seekPageFilterStrategyWithSorting: %w", err)
+		}
+
+		lastID := last.ID
+
+		return &bson.E{
+			"$and", bson.A{
+				bson.D{{
+					opts.sorting.SortBy,
+					bson.D{{sortByCond, lastSortBy}},
+				}},
+				bson.D{{
+					"$or", bson.A{
+						bson.D{{
+							opts.sorting.SortBy,
+							bson.D{{"$not", bson.D{{"$eq", lastSortBy}}}},
+						}},
+						bson.D{{
+							"_id",
+							bson.D{{idCond, lastID}},
+						}},
+					},
+				}},
+			},
+		}, nil
+	},
+}
+
+func (s *mongodb) FindProducts(ctx context.Context, opts ...option) ([]Product, error) {
+	coll := s.cli.Database(s.cfg.Database).Collection("products")
+
+	filter, mongoOpts, err := mongoFindFilterOpts(opts...)
+	if err != nil {
+		return nil, fmt.Errorf("FindProducts: %w", err)
+	}
+
+	curs, err := coll.Find(ctx, filter, mongoOpts)
 	if err != nil {
 		return nil, fmt.Errorf("FindProducts: %w", err)
 	}

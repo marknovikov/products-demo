@@ -22,13 +22,21 @@ message FetchRequest {
 message FetchResponse {
 }
 
+message Product {
+    string id = 1;
+    string name = 2;
+    string price = 3;
+    uint32 priceUpdateCount = 4;
+    google.protobuf.Timestamp lastModified = 5;
+}
+
 // returns a requested page of products
 // able to sort by any product's field
 // what if I change sorting method for arbitrary page?
 message ListRequest {
     message Paging {
-        uint32 offset = 1;
-        uint32 limit = 2;
+        uint32 limit = 1;
+        Product last = 2;
     }
     Paging paging = 1;
 
@@ -40,12 +48,5 @@ message ListRequest {
 }
 
 message ListResponse {
-    message Product {
-        string id = 1;
-        string name = 2;
-        string price = 3;
-        uint32 priceUpdateCount = 4;
-        google.protobuf.Timestamp lastModified = 5;
-    }
     repeated Product products = 1;
 }
