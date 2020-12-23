@@ -56,8 +56,16 @@ run: proto
 	go run cmd/products/main.go
 
 .PHONY: build
-build: proto
+build: deps proto
 	go build -o bin/products cmd/products/main.go
+
+.PHONY: build-in-docker
+build-in-docker:
+	go build -o bin/products cmd/products/main.go
+
+.PHONY: deps
+deps:
+	go mod download
 
 .PHONY: clean
 clean:
